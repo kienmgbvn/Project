@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tree Exploration Simulator</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      text-align: center;
+      background-color: #0f1117;
+      color: #e2e2e2;
+    }
+    button {
+      background: #1f8ef1;
+      border: none;
+      color: white;
+      padding: 6px 12px;
+      margin: 4px;
+      font-weight: bold;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .node {
+      fill: #1f1f1f;
+      stroke: #888;
+      stroke-width: 2px;
+      transition: all 0.4s ease;
+    }
+    .visited {
+      fill: #29b6f6;
+      stroke: #fff;
+    }
+    .current {
+      stroke: #ffeb3b;
+      stroke-width: 4px;
+    }
+    .edge {
+      stroke: #444;
+      stroke-width: 2px;
+      opacity: 0;
+      transition: stroke 0.4s ease, opacity 0.8s ease;
+    }
+    .edge.revealed {
+      stroke: #00e676;
+      opacity: 1;
+    }
+    .port-label {
+      fill: #ccc;
+      font-size: 12px;
+    }
+    table {
+      margin: 20px auto;
+      border-collapse: collapse;
+      background: #1b1e25;
+      color: #e2e2e2;
+    }
+    th, td {
+      border: 1px solid #555;
+      padding: 6px 12px;
+    }
+    #log {
+      text-align: left;
+      width: 70%;
+      margin: 20px auto;
+      background: #1b1e25;
+      padding: 10px;
+      border: 1px solid #444;
+      height: 140px;
+      overflow-y: auto;
+      font-size: 14px;
+      font-family: monospace;
+    }
+    #minimap {
+      width: 200px;
+      height: 150px;
+      background: #222;
+      border: 1px solid #555;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h2>🌳 Tree Exploration Simulator - Live Execution</h2>
+  <div>
+    <strong>Agent:</strong> <span id="agentNum">1</span> / 2 &nbsp;&nbsp;
+    <strong>Energy:</strong> <span id="energyLeft">6</span> / 6
+  </div>
+  <button onclick="step()">Next Step</button>
+  <button onclick="reset()">Reset</button>
+  <button onclick="autoPlay()">Auto Play</button>
+
+  <div style="display: flex; justify-content: space-around; align-items: flex-start; margin-top: 20px;">
+    <div style="width: 40%;">
+      <h3>Port Assignment</h3>
+      <table>
+        <thead><tr><th>Node</th><th>Ports</th></tr></thead>
+        <tbody id="portTable"></tbody>
+      </table>
+      <h3>🧾 Execution Log</h3>
+      <div id="log"></div>
+      <h3>📍 Mini Map (Exploration Progress)</h3>
+      <canvas id="minimap"></canvas>
+    </div>
+    <svg id="tree" width="700" height="500"></svg>
+  </div>
+
+  <script>
+    const nodes = {
+      a: { x: 350, y: 50, ports: ['b', 'c', 'e', 'd'], revealed: false },
+      b: { x: 150, y: 150, ports: ['a'], revealed: false },
+      c: { x: 300, y: 150, ports: ['a', 'f'], revealed: false },
+      d: { x: 500, y: 150, ports: ['a', 'g', 'r'], revealed: false },
+      e: { x: 400, y: 250, ports: ['a'], revealed: false },
+      f: { x: 300, y: 250, ports: ['c'], revealed: false },
+      g: { x: 480, y: 250, ports: ['d'], revealed: false },
+      r: { x: 550, y: 250, ports: ['d'], revealed: false }
+    };
+
+    const edges = [['a', 'b'], ['a', 'c'], ['a', 'd'], ['a', 'e'], ['c', 'f'], ['d', 'g'], ['d', 'r']];
+
+    const edgeMap = {};
+    edges.forEach(([u, v]) => {
+      if (!edgeMap[u]) edgeMap[u] = [];
+      if (!edgeMap[v]) edgeMap[v] = [];
+      edgeMap[u].push(v);
+      edgeMap[v].push(u);
+    });
+
+    const fullPath = [
+      ['a', 0], ['b', 0], ['a', 1], ['c', 0], ['f', 0], ['c', 1],
+      ['a', 2], ['e', 0], ['a', 3], ['d', 1], ['g', 0], ['d', 2], ['r', 0]
+    ];
+
+    let path = [...fullPath];
+    let stepIndex = 0;
+    let currentAgent = 1;
+    let energy = 6;
+    const maxAgents = 2;
+    const maxEnergy = 6;
+    const visited = new Set();
+    const revealedEdges = new Set();
+    const svg = document.getElementById('tree');
+    const logBox = document.getElementById('log');
+    let autoPlayInterval = null;
+    let currentNode = null;
+
+    function drawTree() {
+      svg.innerHTML = '';
+      edges.forEach(([u, v]) => {
+        const id = `${u}-${v}`;
+        const rev = `${v}-${u}`;
+        const revealed = revealedEdges.has(id) || revealedEdges.has(rev);
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', nodes[u].x);
+        line.setAttribute('y1', nodes[u].y);
+        line.setAttribute('x2', nodes[v].x);
+        line.setAttribute('y2', nodes[v].y);
+        line.setAttribute('class', 'edge' + (revealed ? ' revealed' : ''));
+        svg.appendChild(line);
+
+        if (revealed) {
+          const portLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          portLabel.setAttribute('x', (nodes[u].x + nodes[v].x) / 2 + 5);
+          portLabel.setAttribute('y', (nodes[u].y + nodes[v].y) / 2 - 5);
+          portLabel.setAttribute('class', 'port-label');
+          const uPort = nodes[u].ports.indexOf(v);
+          const vPort = nodes[v].ports.indexOf(u);
+          portLabel.textContent = `(${uPort})↔(${vPort})`;
+          svg.appendChild(portLabel);
+        }
+      });
+
+      for (const [id, { x, y, revealed }] of Object.entries(nodes)) {
+        if (!revealed) continue;
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', x);
+        circle.setAttribute('cy', y);
+        circle.setAttribute('r', 15);
+        circle.setAttribute('class', 'node' + (visited.has(id) ? ' visited' : '') + (id === currentNode ? ' current' : ''));
+        svg.appendChild(circle);
+
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', x);
+        label.setAttribute('y', y + 4);
+        label.setAttribute('text-anchor', 'middle');
+        label.textContent = id;
+        svg.appendChild(label);
+      }
+    }
+
+    function updatePortTable() {
+      const tbody = document.getElementById('portTable');
+      tbody.innerHTML = '';
+      for (const [id, node] of Object.entries(nodes)) {
+        if (!node.revealed) continue;
+        const row = document.createElement('tr');
+        const cell1 = document.createElement('td');
+        cell1.textContent = id;
+        const cell2 = document.createElement('td');
+        cell2.textContent = node.ports.map((n, i) => `(${i}) → ${n}`).join(', ');
+        row.appendChild(cell1);
+        row.appendChild(cell2);
+        tbody.appendChild(row);
+      }
+    }
+
+    function log(message) {
+      logBox.innerHTML += `→ ${message}<br>`;
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function step() {
+      if (stepIndex >= path.length || currentAgent > maxAgents) {
+        stopAuto();
+        return;
+      }
+      if (energy === 0) {
+        currentAgent++;
+        energy = maxEnergy;
+        if (currentAgent > maxAgents) {
+          stopAuto();
+          return;
+        }
+        log(`🔄 Switching to agent ${currentAgent}`);
+      }
+      const [node, portIndex] = path[stepIndex++];
+      const neighbor = nodes[node].ports[portIndex];
+      const edgeID = `${node}-${neighbor}`;
+      nodes[node].revealed = true;
+      nodes[neighbor].revealed = true;
+      visited.add(node);
+      visited.add(neighbor);
+      revealedEdges.add(edgeID);
+      currentNode = neighbor;
+      energy--;
+      log(`Agent ${currentAgent} moves from ${node} to ${neighbor} via port ${portIndex} → ${neighbor}`);
+      document.getElementById('agentNum').textContent = currentAgent;
+      document.getElementById('energyLeft').textContent = energy;
+      updatePortTable();
+      drawTree();
+    }
+
+    function reset() {
+      stopAuto();
+      path = [...fullPath];
+      stepIndex = 0;
+      currentAgent = 1;
+      energy = maxEnergy;
+      visited.clear();
+      revealedEdges.clear();
+      Object.values(nodes).forEach(n => n.revealed = false);
+      nodes['a'].revealed = true;
+      currentNode = 'a';
+      logBox.innerHTML = '';
+      updatePortTable();
+      drawTree();
+    }
+
+    function autoPlay() {
+      if (autoPlayInterval) return;
+      autoPlayInterval = setInterval(step, 800);
+    }
+
+    function stopAuto() {
+      clearInterval(autoPlayInterval);
+      autoPlayInterval = null;
+    }
+
+    function updateMinimap() {
+      const canvas = document.getElementById('minimap');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const id in nodes) {
+        const node = nodes[id];
+        if (node.revealed) {
+          ctx.fillStyle = visited.has(id) ? '#29b6f6' : '#666';
+          ctx.beginPath();
+          ctx.arc(node.x / 4, node.y / 4, 5, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+    }
+
+    const originalStep = step;
+    step = function () {
+      originalStep();
+      updateMinimap();
+    };
+
+    reset();
+  </script>
+</body>
+</html>

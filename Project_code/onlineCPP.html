@@ -1,0 +1,273 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ONLINECPP Auto Visualizer</title>
+  <style>
+    body {
+      font-family: Consolas, monospace;
+      text-align: center;
+      background: repeating-linear-gradient(
+      to bottom,
+      #1e1e1e 0px,
+      #1e1e1e 29px,
+      #252526 30px
+    );
+      color: #d4d4d4;
+    }
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(5, 60px);
+      grid-template-rows: repeat(5, 60px);
+      gap: 4px;
+      justify-content: center;
+      margin: 20px auto;
+    }
+    .cell {
+      width: 60px;
+      height: 60px;
+      background: #2d2d2d;
+      border: 1px solid #555;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      position: relative;
+      color: #d4d4d4;
+    }
+    .robot { background-color: #d16969 !important; color: #fff; font-weight: bold; }
+    .start { background-color: #6a9955 !important; font-weight: bold; }
+    .visited { background-color: #264f78; color: #fff; }
+    .cell span.step-number {
+      position: absolute;
+      font-size: 10px;
+      bottom: 2px;
+      right: 2px;
+      color: #ccc;
+    }
+    #status { margin-top: 10px; font-size: 18px; }
+    table, th, td {
+      border: 1px solid #555;
+      color: #d4d4d4;
+      background-color: #2d2d2d;
+    }
+  </style>
+</head>
+<body>
+  <h2>ONLINECPP - Auto Visualizer All Paths</h2>
+  <div id="status">Status: Waiting...</div>
+  <div id="grid"></div>
+
+  <h3>Paths and Energy Used</h3>
+  <table id="pathsTable" style="margin: 10px auto; width: 90%; text-align: left;">
+    <thead>
+      <tr><th>Path #</th><th>Path (Coordinates)</th><th>Energy Used</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+<h3>Robot Paths (Exact Listing)</h3>
+
+  <h3>Tree of Paths (TP) - Colored Edge Types</h3>
+  <svg id="tpTree" width="800" height="800" style="border:1px solid #ccc; background: repeating-linear-gradient(
+      to bottom,
+      #1e1e1e 0px,
+      #1e1e1e 29px,
+      #252526 30px
+    );">
+  <defs>
+    <pattern id="gridPattern" width="20" height="20" patternUnits="userSpaceOnUse">
+      <rect width="20" height="20" fill="#1e1e1e"/>
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#333" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#gridPattern)" />
+</svg>
+
+  <script>
+    const N = 5, M = 5, B = 16;
+    const grid = document.getElementById("grid");
+    const statusDiv = document.getElementById("status");
+
+    const paths = [
+      [[0,0],[0,1],[0,2],[0,3],[0,4],[1,4],[2,4],[3,4],[4,4],[3,4],[2,4],[1,4],[0,4],[0,3],[0,2],[0,1],[0,0]],
+      [[0,0],[0,1],[0,2],[0,3],[0,4],[1,4],[2,4],[3,4],[3,3],[2,3],[1,3],[1,2],[2,2],[1,2],[0,2],[0,1],[0,0]],
+      [[0,0],[0,1],[0,2],[1,2],[2,2],[3,2],[4,2],[4,3],[4,2],[4,1],[3,1],[2,1],[1,1],[1,0],[2,0],[1,0],[0,0]],
+      [[0,0],[1,0],[2,0],[3,0],[4,0],[3,0],[2,0],[1,0],[0,0]]
+    ];
+
+    let pathIndex = 0, step = 0;
+    const edgeMap = new Map();
+    const nodeMap = new Map();
+
+    function initGrid() {
+      for (let i = 0; i < N * M; i++) {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        const x = Math.floor(i / M), y = i % M;
+        cell.dataset.x = x;
+        cell.dataset.y = y;
+        cell.textContent = `${x},${y}`;
+        grid.appendChild(cell);
+      }
+    }
+
+    function clearGrid() {
+      document.querySelectorAll(".cell").forEach(cell => {
+        cell.className = "cell";
+        cell.innerHTML = `${cell.dataset.x},${cell.dataset.y}`;
+      });
+    }
+
+    function addPathToTable(pathIndex, path) {
+      const energyUsed = path.length - 1;
+      const tbody = document.querySelector("#pathsTable tbody");
+      const tr = document.createElement("tr");
+      const pathStr = path.map(coord => `(${coord[0]},${coord[1]})`).join(" → ");
+      tr.innerHTML = `<td>${pathIndex + 1}</td><td style="font-family: monospace;">${pathStr}</td><td>${energyUsed}</td>`;
+      tbody.appendChild(tr);
+    }
+
+    function highlightTreeStep(x, y, prevX, prevY) {
+      const nodeKey = `${x},${y}`;
+      const circle = nodeMap.get(nodeKey);
+      if (circle) circle.setAttribute("fill", "#f9f1a5");
+
+      if (prevX != null && prevY != null) {
+        const edgeKey1 = `${prevX},${prevY}-${x},${y}`;
+        const edgeKey2 = `${x},${y}-${prevX},${prevY}`;
+        const line = edgeMap.get(edgeKey1) || edgeMap.get(edgeKey2);
+        if (line) {
+          line.setAttribute("stroke", "#ffffff");
+          line.setAttribute("stroke-width", 4);
+        }
+      }
+    }
+
+    function renderStep() {
+      const currentPath = paths[pathIndex];
+      if (step >= currentPath.length) {
+        addPathToTable(pathIndex, currentPath);
+        pathIndex++;
+        step = 0;
+        if (pathIndex < paths.length) {
+          setTimeout(renderStep, 1000);
+        } else {
+          statusDiv.textContent = "✅ All paths completed.";
+        }
+        return;
+      }
+
+      const [x, y] = currentPath[step];
+      const [prevX, prevY] = step > 0 ? currentPath[step - 1] : [null, null];
+
+      const cell = document.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+      if (step === 0) {
+        cell.classList.add("start");
+      } else {
+        cell.classList.add("visited");
+        const span = document.createElement("span");
+        span.className = "step-number";
+        span.textContent = step;
+        cell.appendChild(span);
+      }
+
+      document.querySelectorAll(".robot").forEach(c => c.classList.remove("robot"));
+      cell.classList.add("robot");
+
+      const energyUsed = step;
+      const D = Math.abs(x - 0) + Math.abs(y - 0);
+      statusDiv.textContent = `Path ${pathIndex + 1} | Step ${step} | Energy Used = ${energyUsed} | D = ${D}`;
+
+      highlightTreeStep(x, y, prevX, prevY);
+
+      step++;
+      setTimeout(renderStep, 600);
+    }
+
+    function start() {
+      clearGrid();
+      pathIndex = 0;
+      step = 0;
+      renderStep();
+    }
+
+    function drawTreeOfPaths() {
+      const svg = document.getElementById("tpTree");
+      const nodeRadius = 18;
+      const cellSize = 100;
+      const offset = 40;
+
+      const edgeData = [
+        {from:[0,0],to:[0,1],color:"green"},
+        {from:[0,1],to:[0,2],color:"green"},
+        {from:[0,2],to:[0,3],color:"green"},
+        {from:[0,3],to:[0,4],color:"green"},
+        {from:[0,4],to:[1,4],color:"green"},
+        {from:[1,4],to:[2,4],color:"green"},
+        {from:[2,4],to:[3,4],color:"green"},
+        {from:[3,4],to:[4,4],color:"green"},
+        {from:[3,4],to:[3,3],color:"green"},
+        {from:[3,3],to:[2,3],color:"green"},
+        {from:[2,3],to:[1,3],color:"green"},
+        {from:[1,3],to:[1,2],color:"green"},
+        {from:[1,2],to:[2,2],color:"green"},
+        {from:[2,2],to:[3,2],color:"green"},
+        {from:[3,2],to:[4,2],color:"green"},
+        {from:[4,2],to:[4,3],color:"green"},
+        {from:[4,3],to:[4,1],color:"green"},
+        {from:[4,1],to:[3,1],color:"green"},
+        {from:[3,1],to:[2,1],color:"green"},
+        {from:[2,1],to:[1,1],color:"green"},
+        {from:[1,1],to:[1,0],color:"green"},
+        {from:[1,0],to:[2,0],color:"green"},
+        {from:[2,0],to:[3,0],color:"green"},
+        {from:[3,0],to:[4,0],color:"green"},
+        {from:[0,2],to:[1,2],color:"orange", dash:true},
+        {from:[0,0],to:[1,0],color:"red", dash:true}
+      ];
+
+      const drawnNodes = new Set();
+
+      edgeData.forEach(({from, to, color, dash}) => {
+        const [fx, fy] = from, [tx, ty] = to;
+        const x1 = fy * cellSize + offset, y1 = fx * cellSize + offset;
+        const x2 = ty * cellSize + offset, y2 = tx * cellSize + offset;
+
+        const line = document.createElementNS("http://www.w3.org/2000/svg","line");
+        line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+        line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+        line.setAttribute("stroke", color);
+        line.setAttribute("stroke-width", 3);
+        if (dash) line.setAttribute("stroke-dasharray", "6,4");
+        svg.appendChild(line);
+        edgeMap.set(`${fx},${fy}-${tx},${ty}`, line);
+
+        [from, to].forEach(([x, y]) => {
+          const key = `${x},${y}`;
+          if (drawnNodes.has(key)) return;
+          drawnNodes.add(key);
+          const cx = y * cellSize + offset, cy = x * cellSize + offset;
+          const circle = document.createElementNS("http://www.w3.org/2000/svg","circle");
+          circle.setAttribute("cx", cx); circle.setAttribute("cy", cy);
+          circle.setAttribute("r", nodeRadius);
+          circle.setAttribute("fill", "#2d2d2d"); circle.setAttribute("stroke", "#fff");
+          svg.appendChild(circle);
+          nodeMap.set(key, circle);
+
+          const text = document.createElementNS("http://www.w3.org/2000/svg","text");
+          text.setAttribute("x", cx); text.setAttribute("y", cy + 4);
+          text.setAttribute("text-anchor", "middle"); text.setAttribute("font-size", "14"); text.setAttribute("fill", "#ffd700");
+          text.setAttribute("fill", "#d4d4d4");
+          text.textContent = `(${x},${y})`; svg.appendChild(text);
+        });
+      });
+    }
+
+    initGrid();
+    drawTreeOfPaths();
+    start();
+  </script>
+</body>
+</html>
